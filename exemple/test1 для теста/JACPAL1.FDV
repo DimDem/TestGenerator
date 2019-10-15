@@ -1,0 +1,152 @@
+        program    jacpal
+        double precision maxepsd,maxeps
+        parameter (nxd=128,nyd=256,nzd=128)
+        parameter(maxepsd = 0.1,  itmaxd=50)
+        integer nsize(3)
+        double precision,dimension(:,:,:):: a,b
+        allocatable a,b
+C	arrays with block distribution 
+
+        double precision relax,eps,dvtime,time0,time
+        integer trace        
+        
+c---------------------------------------------------------------------
+c      Read input file (if it exists), else take
+c      defaults from parameters
+c---------------------------------------------------------------------
+          
+       write(*, 1000)
+       open (unit=2,file='input.jac',status='old', iostat=istatus)
+
+       if (istatus .eq. 0) then
+         write(*,233) 
+ 233     format(' Reading from input file input.jac')
+         read (2,*) nx,ny,nz
+         read (2,*) itmax
+         read (2,*) maxeps
+         read (2,*) trace
+         close(2)
+       else
+         write(*,234) 
+         nx=nxd
+         ny=nyd
+         nz=nzd
+         maxeps=maxepsd
+         itmax=itmaxd
+       endif
+ 234   format(' No input file input.jac. Using compiled defaults')
+
+       write(*, 1001) nx,ny,nz
+       write(*, 1002) itmax,maxeps
+
+ 1000 format(//,' JAC-Benchmark', /)
+ 1001     format(' Size: ', i3, 'x', i3, 'x', i3)
+ 1002     format(' Iterations: ', i3, '    eps: ', F10.6)
+       if(nx*ny*nz .gt. nxd*nyd*nzd) then
+         print *,
+     >   ' Problem size too big! Increase parameters: nxd,nyd,nzd'
+         stop
+       endif
+
+       nsize(1) = nx
+       nsize(2) = ny
+       nsize(3) = nz
+       ALLOCATE (a(nx,ny,nz))
+       ALLOCATE (b(nx,ny,nz)  )
+       call init (a,nx,ny,nz)
+       time0=dvtime()
+       do it = 1,itmax
+         eps = relax(a,b,nx,ny,nz)
+         if(trace.ne.0) then
+           if(it .eq.1 .or. mod(it,trace).eq.0) 
+     >       print *, ' it= ',it, '   eps= ',eps     
+         endif
+         if(eps.lt.maxeps) go to 3
+       end do
+3      time = dvtime()-time0
+       write(*,1003) time
+       write(*,1005) eps
+1003   format(' Time in seconds', f12.2)
+1005   format(' eps', 14x,f10.6)       
+       if(trace.ne.0) call verify(a,nx,ny,nz)
+       DEALLOCATE (a,b)
+       end
+
+
+c---------------------------------------------------------------------
+c---------------------------------------------------------------------
+      subroutine init(a,nx,ny,nz)
+c---------------------------------------------------------------------
+c---------------------------------------------------------------------
+      double precision a(nx,ny,nz),solution
+      integer nx,ny,nz
+      solution(i,j,k) = 10.*(i-1)/(nx-1) +10.*(j-1)/(ny-1)+
+     >                  10.*(k-1)/(nz-1)
+      do k = 1,nz
+        do j = 1,ny
+          do i = 1,nx
+             if(k.eq.1 .or. k.eq.nz .or. j.eq.1 .or. j.eq.ny .or.
+     >          i.eq.1 .or. i.eq.nx) then
+                a(i,j,k) = solution(i,j,k)
+             else
+                a(i,j,k) = 0.D0                
+             endif
+           enddo
+         enddo
+       enddo
+       end
+
+c---------------------------------------------------------------------
+c---------------------------------------------------------------------
+      double precision function relax(a,b,nx,ny,nz)
+c---------------------------------------------------------------------
+c---------------------------------------------------------------------
+      double precision a(nx,ny,nz),b(nx,ny,nz),eps
+      integer nx,ny,nz
+
+      do k = 2,nz-1
+        do j = 2,ny-1
+          do i = 2,nx-1
+             b(i,j,k) = (a(i-1,j,k) + a(i+1,j,k) +
+     >                   a(i,j-1,k) + a(i,j+1,k) +
+     >                   a(i,j,k-1) + a(i,j,k+1)) / 6  
+          enddo
+        enddo
+      enddo
+      eps = 0.D0
+      do k = 2,nz-1
+        do j = 2,ny-1
+          do i = 2,nx-1
+             bt = b(i,j,k)
+             eps = max(eps, abs(bt-a(i,j,k)))
+             a(i,j,k) = bt
+          enddo
+        enddo
+      enddo
+      relax = eps
+      end
+ 
+   
+c---------------------------------------------------------------------
+c---------------------------------------------------------------------
+      subroutine verify(a,nx,ny,nz)
+c---------------------------------------------------------------------
+c---------------------------------------------------------------------
+      double precision a(nx,ny,nz),solution,eps
+      integer nx,ny,nz
+      solution(i,j,k) = 10.*(i-1)/(nx-1) +10.*(j-1)/(ny-1)
+     >                  +10.*(k-1)/(nz-1)
+      eps = 0.D0
+      do k = 1,nz
+        do j = 1,ny
+          do i = 1,nx
+            eps = max(eps,abs(a(i,j,k)-solution(i,j,k)))
+           enddo
+         enddo
+      enddo
+      write(*,1004) eps
+1004  format(' Delta',12x, f10.6)
+    
+      end
+     
+

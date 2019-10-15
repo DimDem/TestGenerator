@@ -1,0 +1,23 @@
+      PROGRAM init
+c---------------------------------------------------------------------
+c---------------------------------------------------------------------
+      PARAMETER   ( nx = 100 )
+	  PARAMETER   ( ny = 100 )
+	  PARAMETER   ( nz = 100 )
+      double precision a(nx,ny,nz),solution
+      solution(i,j,k) = 10.*(i-1)/(nx-1) +10.*(j-1)/(ny-1)+
+     >                  10.*(k-1)/(nz-1)
+	  print *, '**********  TEST_init   **********'
+      do k = 1,nz
+        do j = 1,ny
+          do i = 1,nx
+             if(k.eq.1 .or. k.eq.nz .or. j.eq.1 .or. j.eq.ny .or.
+     >          i.eq.1 .or. i.eq.nx) then
+                a(i,j,k) = solution(i,j,k)
+             else
+                a(i,j,k) = 0.D0                
+             endif
+           enddo
+         enddo
+       enddo
+       end

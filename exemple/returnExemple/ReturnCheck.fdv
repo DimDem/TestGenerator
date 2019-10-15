@@ -1,0 +1,21 @@
+        PROGRAM    JAC
+        implicit none
+		real a(10),min,GetMin
+		integer i,n
+		a=(/(50/i,i=1,5),(i*10,i=1,5)/)           ! 50.00000       25.00000       16.00000       12.00000       ! 10.00000       10.00000       20.00000       30.00000       ! 40.00000       50.00000
+		n=10
+		min=GetMin(a,n)
+		print *,a
+		print *,min
+		end program sub_min
+	
+	real function GetMin(ar,n)
+	real ar(*)
+	integer n
+22	GetMin=ar(n)
+	do n=n-1,1,-1
+		if (ar(n)<GetMin) GetMin=ar(n)
+	end do
+	Go to 44
+44	return
+	end
