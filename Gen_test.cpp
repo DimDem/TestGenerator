@@ -13,11 +13,33 @@
 #include <string>
 
 using namespace std;
+
 SgFile *current_file;
 int current_file_id;
-int RezervLabelForReturn = 1000;
+int RezervLabel = 1000;
 const int MannyOfCopies = 1;
+//FUNCTION_REF
 
+int isLabel(int num)
+{
+	PTR_LABEL lab;
+	for (lab = PROJ_FIRST_LABEL(); lab; lab = LABEL_NEXT(lab))
+		if (num == LABEL_STMTNO(lab))
+			return 1;
+	return 0;
+}
+
+int max_lab = 90000;
+
+SgLabel* GetLabel()
+{
+	static int lnum = 90000;
+	if (lnum > max_lab)
+		return (new SgLabel(lnum--));
+	while (isLabel(lnum))
+		lnum--;
+	return (new SgLabel(lnum--));
+}
 
 SgStatement * lastStmtOfDo(SgStatement *stdo)
 {
@@ -126,7 +148,7 @@ void CommonParce(SgExprListExp *expr_list, map<string, SgSymbol*>& notchange_nam
 }
 */
 
-void list_check(SgExpression *work_expr, map<string, SgSymbol*>& notchange_name) {
+void list_check(SgExpression *work_expr, map<string, SgSymbol*>& formalParametrs, map<string, SgSymbol*>& notchange_name) {
 
 	if (work_expr == nullptr)
 		return;
@@ -136,7 +158,9 @@ void list_check(SgExpression *work_expr, map<string, SgSymbol*>& notchange_name)
 	{
 		SgExprListExp *expr_list = isSgExprListExp(work_expr);
 		if (expr_list != nullptr) {
-			SgSymbol *symb = expr_list->lhs()->symbol();
+			SgExpression *expresLhs = expr_list->lhs();
+			SgArrayRefExp *arayExpr = isSgArrayRefExp(expresLhs);
+			SgSymbol *symb = expresLhs->symbol();
 			if (symb != nullptr) //+ проверка на наличие имени &&symb->identifier()
 				switch (symb->variant())
 				{
@@ -148,10 +172,53 @@ void list_check(SgExpression *work_expr, map<string, SgSymbol*>& notchange_name)
 						notchange_name.insert(pair<string, SgSymbol*>{string(symb->identifier()), symb});
 						break;
 					}
-					default:
+					default: {
+						if (arayExpr)// && formalParametrs.count(string(symb->identifier()))) //если массив из аргументов - проверяем какой тип
+						{
+							bool copyArray = true;
+							for (int i = 0; i < arayExpr->numberOfSubscripts() && copyArray; ++i )
+							{
+								SgExpression* tmpSub = arayExpr->subscript(i);
+								switch (tmpSub->variant())
+								{
+									case DDOT: {
+										SgExpression* tl = tmpSub->lhs();
+										if (tl != 0) {
+											if (tl->variant() == STAR_RANGE) {
+												copyArray = false;
+												break;
+											}
+										}
+										SgExpression* tr = tmpSub->rhs();
+										if (tr != 0) {
+											if (tr->variant() == STAR_RANGE) {
+												copyArray = false;
+												break;
+											}
+										}
+										if (tl == 0 && tr == 0) {
+												copyArray = false;
+												break;
+											}
+										break;
+									}
+									case STAR_RANGE: {
+										copyArray = false;
+										break;
+									}
+									default:
+										break;
+								}
+							}
+							if (!copyArray) {
+								formalParametrs.erase(string(symb->identifier()));
+								notchange_name.insert(pair<string, SgSymbol*>{string(symb->identifier()), symb});
+							}
+						}
 						break;
+					}
 				}
-			list_check(expr_list->rhs(), notchange_name);
+			list_check(expr_list->rhs(), formalParametrs, notchange_name);
 		}
 		break;
 	}
@@ -183,9 +250,66 @@ void list_check(SgExpression *work_expr, map<string, SgSymbol*>& notchange_name)
 	return;
 }
 
+void initilaseFormalParam(SgExpression *work_expr, map<string, SgSymbol*> &formalParam)
+{
+	if (work_expr == nullptr)
+		return;
+	SgExprListExp *expr_list = isSgExprListExp(work_expr);
+	if (expr_list != nullptr) {
+		SgExpression *expresLhs = expr_list->lhs();
+		SgArrayRefExp *arayExpr = isSgArrayRefExp(expresLhs);
+		SgSymbol *symb = expresLhs->symbol();
+		if (symb != nullptr) {
+				if (arayExpr) //можно поставить catch если появятся ещё места где это можно сделать
+				{
+					for (int i = 0; i < arayExpr->numberOfSubscripts(); ++i)
+					{
+						SgExpression* tmpSub = arayExpr->subscript(i);
+						switch (tmpSub->variant())
+						{
+						case DDOT: {
+							SgExpression* tl = tmpSub->lhs();
+							if (tl != 0) {
+								if (tl->symbol() != 0) {
+									if(formalParam.count(string(tl->symbol()->identifier()))){
+										tl->setSymbol(formalParam[string(tl->symbol()->identifier())]);
+									}
+								}
+							}
+							SgExpression* tr = tmpSub->rhs();
+							if (tr != 0) {
+								if (tl->symbol() != 0) {
+									if (formalParam.count(string(tl->symbol()->identifier()))) {
+										tl->setSymbol(formalParam[string(tl->symbol()->identifier())]);
+									}
+								}
+							}
+							if (tl == 0 && tr == 0) {
+								break;
+							}
+							break;
+						}
+						case STAR_RANGE: {
+							break;
+						}
+						default:
+							if (tmpSub->symbol() != 0) {
+								if (formalParam.count(string(tmpSub->symbol()->identifier()))) {
+									tmpSub->setSymbol(formalParam[string(tmpSub->symbol()->identifier())]);
+								}
+							}
+							break;
+						}
+					}
+				}
+		}
+		initilaseFormalParam(expr_list->rhs(), formalParam);
+	}
+}
+
 int parse_expr(SgExpression *work_expr, map<string, SgSymbol*>& notchange_name,int& num)//, SgFile *f, SgSymbol* name_copyfunc) {
 {
-	
+	map<string, SgSymbol*> fl;
 	if (work_expr == nullptr)
 		return 1;
 
@@ -304,22 +428,23 @@ void change_names_in_coppy(SgStatement* &copyoffunc, SgSymbol* start_symb, map<s
 }
 
 template < typename Hdrtype >
-void work_with_hedr(map<string, SgSymbol*>& notchange_name, Hdrtype* Hedr)
+void work_with_hedr(map<string, SgSymbol*>& formalParametrs, Hdrtype* Hedr)
 {
 	int num_param = Hedr->numberOfParameters();
 	for (int i = 0; i < num_param; ++i)
 	{
 		SgSymbol *args = Hedr->parameter(i);
-		notchange_name.insert(pair<string, SgSymbol*>{string(args->identifier()), args});
+		formalParametrs.insert(pair<string, SgSymbol*>{string(args->identifier()), args});
 	}
 }
 
 //пробегаемся по коду-смотрим есть ли то, что не должно менять имени
 //проводим изменения до основного алгоритма
 //со временем будут рассматриваться все особые случае в отдельности, а для стандартных будет стандартный parce
-void what_not_change(map<string, SgSymbol*>& notchange_name, SgStatement* ffunc, SgStatement* &functionConteinsStatement, int& numInterfaceFunctions,
+void what_not_change(map<string, SgSymbol*>& notchange_name, map<string, SgSymbol*>& formalParametrs, SgStatement* ffunc, SgStatement* &functionConteinsStatement, int& numInterfaceFunctions,
 	bool& haveReturn)
 {
+	SgLabel* contLabel = nullptr;
 	for (SgStatement *tmpSt = ffunc; tmpSt != ffunc->lastNodeOfStmt(); )
 	{
 		tmpSt->unparsestdout();
@@ -330,21 +455,21 @@ void what_not_change(map<string, SgSymbol*>& notchange_name, SgStatement* ffunc,
 		{
 			//по сути лишняя работа
 			SgProgHedrStmt *Hedr = isSgProgHedrStmt(tmpSt);
-			work_with_hedr <SgProgHedrStmt>(notchange_name, Hedr);
+			work_with_hedr <SgProgHedrStmt>(formalParametrs, Hedr);
 			tmpSt = tmpSt->lexNext();
 			continue;
 		}
 		case FUNC_HEDR:
 		{
 			SgFuncHedrStmt *Hedr = isSgFuncHedrStmt(tmpSt);
-			work_with_hedr <SgFuncHedrStmt>(notchange_name, Hedr);
+			work_with_hedr <SgFuncHedrStmt>(formalParametrs, Hedr);
 			tmpSt = tmpSt->lexNext();
 			continue;
 		}
 		case PROC_HEDR:
 		{
 			SgProcHedrStmt *Hedr = isSgProcHedrStmt(tmpSt);
-			work_with_hedr <SgProcHedrStmt>(notchange_name, Hedr);
+			work_with_hedr <SgProcHedrStmt>(formalParametrs, Hedr);
 			tmpSt = tmpSt->lexNext();
 			continue;
 		}
@@ -392,6 +517,7 @@ void what_not_change(map<string, SgSymbol*>& notchange_name, SgStatement* ffunc,
 		case PARAM_DECL: 
 
 		case FORMAT_STAT:
+		case DIM_STAT:
 		case PROC_STAT:
 		case COMM_STAT:
 		case STMTFN_STAT:
@@ -400,14 +526,16 @@ void what_not_change(map<string, SgSymbol*>& notchange_name, SgStatement* ffunc,
 			{
 				if (tmpSt->expr(i) != nullptr) {
 					SgExpression *expr = tmpSt->expr(i);
-					list_check(expr, notchange_name);
+					list_check(expr, formalParametrs, notchange_name);
 				}
 			}
 			tmpSt = tmpSt->lexNext();
 			continue;
 		}
 		//здесь не могут найтись не дублирующиеся элементы:
+
 		case ELSEIF_NODE:
+		case ELSEWH_NODE:
 		case LOGIF_NODE:
 		case CONTINUE_NODE:
 		case ASSIGN_NODE:
@@ -418,10 +546,10 @@ void what_not_change(map<string, SgSymbol*>& notchange_name, SgStatement* ffunc,
 		case BREAK_NODE:		
 		case LOOP_NODE:
 		case FOR_NODE:
-		case WHERE_NODE:
 		case IF_NODE:
 		case CASE_NODE:
 		case DO_WHILE_NODE:
+		case WHERE_NODE:
 
 		//file work
 		case ENDFILE_STAT:
@@ -442,44 +570,59 @@ void what_not_change(map<string, SgSymbol*>& notchange_name, SgStatement* ffunc,
 		case EQUI_STAT:
 
 		case NAMELIST_STAT:
-		case DIM_STAT:
 		
 		case FUNC_CALL:
 		case PROC_CALL:
 
 		case MODULE_STMT:
+
 		case USE_STMT:
-		case TARGET_STMT:
+
 		case PUBLIC_STMT:
 		case PRIVATE_STMT:	
+		case SEQUENCE_STMT:
+
 		case CYCLE_STMT:
-		case ALLOCATE_STMT:
-		case DEALLOCATE_STMT:
 		case NULLIFY_STMT:
 		case OPTIONAL_STMT: 
 		case INTENT_STMT:
+
 		case POINTER_STMT:
+		case TARGET_STMT:
+
+		case ALLOCATE_STMT:
+		case DEALLOCATE_STMT:
 		case ALLOCATABLE_STMT:
+			//ALLOCATABLE_OP
+
 		case EXIT_STMT:
 
 		//case BLOCK_DATA:
-
+			
 		case CONTROL_END:
 		{
 			tmpSt = tmpSt->lexNext();
 			continue;
 		}
-		//возможно что из-за return не будет код доходить до копий
 		case RETURN_STAT:
 		{
+			//создаём в конце continue
+			if (!haveReturn)
+			{
+				SgStatement* lastNode = ffunc->lastNodeOfStmt();
+				SgStatement* contStg = new SgStatement(CONT_STAT);
+				contLabel = GetLabel();
+				contStg->setLabel(*contLabel);
+				lastNode->insertStmtBefore(*contStg, *lastNode->controlParent());
+			}
 			haveReturn = true;
-			SgLabel newLabel(RezervLabelForReturn);// временное решение
-			SgGotoStmt *ReturnGoTo = new SgGotoStmt(newLabel);
+			//заменяем ретурн на goto
+			SgGotoStmt *contGoTo = new SgGotoStmt(*contLabel);
 			if (tmpSt->hasLabel()) {
 				SgLabel* tmpLabel = tmpSt->label();
-				ReturnGoTo->setLabel(*tmpLabel);
+				contGoTo->setLabel(*tmpLabel);
 			}
-			tmpSt->insertStmtBefore(*ReturnGoTo, *tmpSt->controlParent());
+			tmpSt->insertStmtBefore(*contGoTo, *tmpSt->controlParent());
 			SgStatement* nextTmpSt = tmpSt->lexNext();
 			tmpSt->deleteStmt();
 			tmpSt = nextTmpSt;
@@ -502,20 +645,24 @@ void what_not_change(map<string, SgSymbol*>& notchange_name, SgStatement* ffunc,
 }
 
 //процесс редактирования выражений.
-void change_coppy_in_start_decl(SgStatement* copyoffunc, SgFile *f, SgSymbol* name_copyfunc, map<string, SgSymbol*>& notchange_name, SgStatement* definitions_end,int& num, SgSymbol* ProgName, SgStatement* &containsStatement)
+void change_coppy_in_start_decl(SgStatement* copyoffunc, SgFile *f, SgSymbol* name_copyfunc, map<string, SgSymbol*>& notchange_name, map<string, SgSymbol*> &formalParam, SgStatement* definitions_end,int& num, SgSymbol* ProgName, SgStatement* &containsStatement)
 {
 	for (SgStatement *copy = copyoffunc; copy != copyoffunc->lastNodeOfStmt(); )
-	{	
-		//cout << "variat = " << copy->variant() << endl;
-		//copy->unparsestdout();
+	{
+		cout << "variat = " << copy->variant() << endl;
+		copy->unparsestdout();
 		switch (copy->variant())
 		{
 		//должны существовать в единственном экземпляре
 		case USE_STMT:
 		case IMPL_DECL:
 		case MODULE_STMT:
+		case OPTIONAL_STMT:
 		case STMTFN_STAT:
 		case EXTERN_STAT:
+		case SEQUENCE_STMT:
+		case PUBLIC_STMT:
+		case PRIVATE_STMT:
 		case INTRIN_STAT: {
 			SgStatement* next_copy = copy->lexNext();
 			copy->deleteStmt();
@@ -611,7 +758,6 @@ void change_coppy_in_start_decl(SgStatement* copyoffunc, SgFile *f, SgSymbol* na
 
 		//в элементы не смотрим
 		case NAMELIST_STAT:
-		case DIM_STAT:
 
 		//вызовы
 		case FUNC_CALL:
@@ -626,33 +772,43 @@ void change_coppy_in_start_decl(SgStatement* copyoffunc, SgFile *f, SgSymbol* na
 		}
 		//на будущее смотрим внутрь всех следующих управления:
 		//case BLOCK_DATA:
-
-		case LOOP_NODE:
-		case FOR_NODE:
-		case WHERE_NODE:
-		case ELSEIF_NODE:
-		case IF_NODE:
-		case LOGIF_NODE:
-		case CASE_NODE:
-		case DO_WHILE_NODE:
-
 		case COMM_STAT:
 		case PROC_STAT:
 		case FORMAT_STAT:
+		case DIM_STAT:
 
 		//всё же решил data копировать
 		case DATA_DECL:
 		case SAVE_DECL:
 		case VAR_DECL:
-		case PARAM_DECL:
+		case PARAM_DECL: //необходимо проверять только в определениях
+		{
+			for (int i = 0; i < 3; ++i)
+			{
+				if (copy->expr(i) != nullptr) {
+					SgExpression *expr = copy->expr(i);
+					initilaseFormalParam(expr, formalParam);
+				}
+			}
+		}
+
+		case LOOP_NODE:
+		case FOR_NODE:
+		case ELSEIF_NODE:
+		case ELSEWH_NODE:
+		case IF_NODE:
+		case LOGIF_NODE:
+		case CASE_NODE:
+		case DO_WHILE_NODE:
+		case WHERE_NODE:
+
+
 
 		//рассматриваем все операторы (взято на будущее - возможно внутри может что то оказаться)
 		case INTENT_STMT:
 		case ALLOCATABLE_STMT:
 		case POINTER_STMT:
 		case TARGET_STMT:
-		case PUBLIC_STMT:
-		case PRIVATE_STMT:
 		case ALLOCATE_STMT:
 		case DEALLOCATE_STMT:
 		case NULLIFY_STMT:
@@ -774,14 +930,28 @@ SgSymbol* get_end_symbol(SgFile *f)
 {
 	for (auto symb=f->firstSymbol(); symb != nullptr; symb = symb->next())
 	{
-		/*cout << symb->id() << " - ";
+		cout << symb->id() << " - ";
 		cout << symb->identifier() << " v= ";
 		cout << symb->variant();
-		cout << endl;*/
+		cout << endl;
 		if (symb->next() == nullptr)
 			return symb;
 	}
-	
+	return f->firstSymbol();//возможна пустая функция?
+}
+
+SgSymbol* allsymbols(SgFile *f)
+{
+	for (auto symb = f->firstSymbol(); symb != nullptr; symb = symb->next())
+	{
+		cout << symb->id() << " - ";
+		cout << symb->identifier() << " v= ";
+		cout << symb->variant();
+		cout << endl;
+		if (symb->next() == nullptr)
+			return symb;
+	}
+	return f->firstSymbol();//возможна пустая функция?
 }
 
 void deleteDublicateFunction(SgFile *f, SgSymbol* programName)
@@ -801,8 +971,6 @@ void ChangeReturn(SgStatement* function, const bool& haveReturn)
 	{
 		SgStatement* lastNode = function->lastNodeOfStmt();
 		SgStatement* returnLabel = new SgStatement(RETURN_STAT);
-		SgLabel newLabel(RezervLabelForReturn);
-		returnLabel->setLabel(newLabel);
 		lastNode->insertStmtBefore(*returnLabel, *lastNode->controlParent());
 	}
 }
@@ -828,7 +996,8 @@ void create_coppy(SgFile *f, SgStatement* function, int &numInterfaceFunctions, 
 	//пробегаемся чтобы найти то что не нужно изменять
 	//найтти символы информация о которых должна быть до начала алгоритма
 	bool haveReturn = false;
-	what_not_change(notchange_name, function, functionConteinsStatement, numInterfaceFunctions, haveReturn);
+	map<string, SgSymbol*> formalParam;
+	what_not_change(notchange_name, formalParam, function, functionConteinsStatement, numInterfaceFunctions, haveReturn);
 
 	for (int i = 0; i < manny; ++i) 
 	{
@@ -847,7 +1016,7 @@ void create_coppy(SgFile *f, SgStatement* function, int &numInterfaceFunctions, 
 		//change_coppy_in_start_decl(copyoffunc,f, fccop, notchange_name, copy_definitions_radius,i); //преобразование копии которую следует вставить (часть определений)- работающая версия
 		SgStatement* containsStatement = nullptr;
 
-		change_coppy_in_start_decl(copyoffunc, f, fccop, notchange_name, function, i, ProgName, containsStatement);
+		change_coppy_in_start_decl(copyoffunc, f, fccop, notchange_name, formalParam, function, i, ProgName, containsStatement);
 		//change_coppy_in_start_code(copyoffunc, f, fccop, notchange_name, copy_definitions_radius); //преобразование копии которую следует вставить (часть выполнения)
 
 		SgStatement * copy_definitions_radius = copyoffunc->lexNext();
@@ -876,7 +1045,7 @@ void create_coppy(SgFile *f, SgStatement* function, int &numInterfaceFunctions, 
 	ChangeReturn(function, haveReturn);
 }
 
-int main(int argc, char *argv[])
+int Test()
 {
 	const char *fout_name = "dvm.proj";
 
@@ -885,10 +1054,82 @@ int main(int argc, char *argv[])
 	for (int i = 0; i < count_file; ++i)
 	{
 		SgFile*f;
-
 		f = &(proj.file(i));
 		int num_routines;
 		num_routines = f->numberOfFunctions();
+
+		//запись фаил перед изменениями
+		FILE *work_out = fopen("work_out.txt", "w");
+		f->unparse(work_out);
+		fclose(work_out);
+
+		//проход по всем функциям
+		for (int j = 0; j < num_routines; j++) {
+
+			SgStatement*sub;
+			SgSymbol*subsym;
+
+			sub = f->functions(j);
+			subsym = sub->symbol();
+
+			printf("Function %d'sname is %s\n", i + j, subsym->identifier());
+
+			SgSymbol* start_symb = 0;
+
+			for (auto symb = f->firstSymbol(); symb != nullptr; symb = symb->next())
+			{
+				cout << symb->id() << " - ";
+				cout << symb->identifier() << " v= ";
+				cout << symb->variant();
+				cout << endl;
+				if (symb->next() == nullptr)
+				{
+					start_symb = symb;
+					break;
+				}
+			}
+
+			SgSymbol* fccop = &(sub->symbol()->copySubprogram(*f->firstStatement()));
+
+			for (SgSymbol* symb = start_symb->next(); symb != nullptr; symb = symb->next())
+			{
+				string s = symb->identifier();
+				s += "_TG";
+				s += "_num";
+				symb->changeName(s.c_str());
+			}
+
+			for (auto symb = f->firstSymbol(); symb != nullptr; symb = symb->next())
+			{
+				cout << symb->id() << " - ";
+				cout << symb->identifier() << " v= ";
+				cout << symb->variant();
+				cout << endl;
+			}
+
+			FILE *someF = fopen("someF", "w");
+			f->unparse(someF);
+			fclose(someF);
+		}
+	}
+	return 0;
+}
+
+int main(int argc, char *argv[])
+{
+	//Test();
+	const char *fout_name = "dvm.proj";
+
+	SgProject proj(fout_name);
+	int count_file = proj.numberOfFiles();
+	for (int i = 0; i < count_file; ++i)
+	{
+		SgFile*f;
+		f = &(proj.file(i));
+		int num_routines;
+		num_routines = f->numberOfFunctions();
+
+		max_lab = getLastLabelId();
 
 		//запись фаил перед изменениями
 		FILE *work_out = fopen("work_out.txt", "w");
